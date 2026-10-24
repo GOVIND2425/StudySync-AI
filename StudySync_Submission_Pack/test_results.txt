@@ -1,0 +1,127 @@
+=== PYTEST BACKEND TESTS ===
+============================= test session starts =============================
+platform win32 -- Python 3.13.16, pytest-9.1.1, pluggy-1.7.0 -- C:\Users\govin\OneDrive\Desktop\StudySync-AI\venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: C:\Users\govin\OneDrive\Desktop\StudySync-AI
+plugins: anyio-4.15.1
+collecting ... collected 14 items
+
+backend/tests/test_scheduler.py::test_priority_score_calculation PASSED  [  7%]
+backend/tests/test_scheduler.py::test_high_priority_topic_ordering PASSED [ 14%]
+backend/tests/test_scheduler.py::test_daily_availability_constraints PASSED [ 21%]
+backend/tests/test_scheduler.py::test_weekly_availability_constraints PASSED [ 28%]
+backend/tests/test_scheduler.py::test_examination_deadline_restrictions PASSED [ 35%]
+backend/tests/test_scheduler.py::test_no_overlapping_sessions PASSED     [ 42%]
+backend/tests/test_scheduler.py::test_dynamic_rescheduling PASSED        [ 50%]
+backend/tests/test_scheduler.py::test_preservation_of_completed_sessions PASSED [ 57%]
+backend/tests/test_scheduler.py::test_infeasible_schedule_handling PASSED [ 64%]
+backend/tests/test_scheduler.py::test_empty_profiles PASSED              [ 71%]
+backend/tests/test_scheduler.py::test_invalid_dates_and_mastery_values PASSED [ 78%]
+backend/tests/test_scheduler.py::test_three_demo_profiles PASSED         [ 85%]
+backend/tests/test_scheduler.py::test_database_persistence PASSED        [ 92%]
+backend/tests/test_scheduler.py::test_api_error_handling PASSED          [100%]
+
+============================== warnings summary ===============================
+venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\govin\OneDrive\Desktop\StudySync-AI\venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+backend\main.py:39
+  C:\Users\govin\OneDrive\Desktop\StudySync-AI\backend\main.py:39: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event("startup")
+
+venv\Lib\site-packages\fastapi\applications.py:4723
+  C:\Users\govin\OneDrive\Desktop\StudySync-AI\venv\Lib\site-packages\fastapi\applications.py:4723: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+backend/tests/test_scheduler.py: 86 warnings
+  C:\Users\govin\OneDrive\Desktop\StudySync-AI\venv\Lib\site-packages\sqlalchemy\sql\schema.py:4296: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    return util.wrap_callable(lambda ctx: fn(), fn)  # type: ignore[call-arg, no-any-return, no-untyped-call]  # noqa: E501
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================= 14 passed, 89 warnings in 1.40s =======================
+
+
+
+=== COMPREHENSIVE AUDIT & INVARIANT VERIFICATION ===
+======================================================================
+STARTING COMPLETE FINAL AUDIT: STUDYSYNC AI (Q7)
+======================================================================
+
+[Audit Item 1] Testing Intelligent Priority Engine Formulation...
+ -> Urgent Deficit: 94.0/100 | Mid: 64.0/100 | Mastered: 33.0/100 -> PASS
+
+[Audit Item 2] Testing Daily & Weekly Capacity Limits...
+ -> Checked 7 scheduled days. Violations: 0 -> PASS
+
+[Audit Item 3] Testing Pedagogical Phasing (Study, Practice, Revision)...
+ -> Weak study hours: 1.75h vs Strong study hours: 0.25h
+ -> Session types present in DB: {'revision', 'practice', 'study'} -> PASS
+
+[Audit Item 4] Testing Progress Updates & Dynamic Rescheduling...
+ -> Session 1 marked complete, schedule regenerated, preserved: True -> PASS
+
+[Audit Item 5] Testing Persona Differentiation...
+ -> P1: Govind Innani (16.0h, 24 sessions)
+ -> P2: Lakshy Kesharwani (25.5h, 27 sessions)
+ -> P3: Adhiranshu Singh (18.0h, 23 sessions) -> PASS
+
+[Audit Item 6] Testing Database Persistence across Cold Engine Restart...
+ -> Canary ID 24 found in SQLite: True -> PASS
+
+[Audit Item 7] Testing Input Validation & Edge Cases...
+ -> Edge case subtests: 5/5 -> PASS
+
+[Audit Item 8] Testing Complete REST API Surface...
+ -> Endpoints checked: 7 | All OK: True -> PASS
+
+======================================================================
+AUDIT SUMMARY: 100% COMPLETE & VERIFIED
+======================================================================
+ • priority_formulation      : [PASS] Urgent deficit scored 80+, mastered scored <=35, factors correctly decomposed.
+ • daily_weekly_limits       : [PASS] All scheduled daily session blocks are strictly within student availability limits.
+ • pedagogical_phasing       : [PASS] Weak topic assigns more study hours; all 3 phases (study, practice, revision) generated.
+ • dynamic_rescheduling      : [PASS] Completed sessions are locked and preserved during regeneration; remaining schedule rebalanced.
+ • persona_differentiation   : [PASS] All 3 personas have unique profiles, target exams, curriculums, and distinct generated schedules.
+ • database_persistence      : [PASS] Created records survive application memory isolation and persist reliably in SQLite database.
+ • edge_cases                : [PASS] 404s returned for invalid IDs, 422 for missing foreign keys, numbers clamped to bounds.
+ • api_lifecycle             : [PASS] All core endpoints respond with HTTP 200 and well-typed JSON.
+
+C:\Users\govin\OneDrive\Desktop\StudySync-AI\venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+  from starlette.testclient import TestClient as TestClient  # noqa
+
+
+=== VERIFY INTEGRATION SCRIPT ===
+1. Health check: healthy
+2. Profiles loaded: 3 profiles -> ['Govind Innani', 'Lakshy Kesharwani', 'Adhiranshu Singh']
+3. Profile 1 (Govind Innani) has 2 subjects
+4. Scheduled sessions for Govind: 24 sessions
+5. Updated session 1: completed=True
+6. Reschedule success: True | Total scheduled hours: 16.0
+7. Analytics: Completion rate: 4.2 % | Weak topics count: 4
+8. Automated test runner via API: all_passed = True (14 tests executed)
+   - test_priority_score_calculation: PASSED
+   - test_high_priority_topic_ordering: PASSED
+   - test_daily_availability_constraints: PASSED
+   - test_weekly_availability_constraints: PASSED
+   - test_examination_deadline_restrictions: PASSED
+   - test_no_overlapping_sessions: PASSED
+   - test_dynamic_rescheduling: PASSED
+   - test_preservation_of_completed_sessions: PASSED
+   - test_infeasible_schedule_handling: PASSED
+   - test_empty_profiles: PASSED
+   - test_invalid_dates_and_mastery_values: PASSED
+   - test_three_demo_profiles: PASSED
+   - test_database_persistence: PASSED
+   - test_api_error_handling: PASSED
+
