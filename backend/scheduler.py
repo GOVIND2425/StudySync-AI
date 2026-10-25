@@ -4,7 +4,7 @@ from datetime import datetime, date, timedelta
 from typing import List, Dict, Any, Tuple, Optional
 from sqlalchemy.orm import Session
 
-from .models import StudentProfile, Subject, Topic, StudySession
+from .models import StudentProfile, Subject, Topic, StudySession, ManualTask
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -262,6 +262,19 @@ class IntelligentScheduler:
                 end_m = timestr_to_minutes(cs.end_time)
                 timeline[cs.date]["intervals"].append((start_m, end_m))
                 timeline[cs.date]["used_mins"] += cs.duration_minutes
+
+        # Track manual tasks in timeline intervals to prevent clash and reserve capacity
+        manual_tasks = (
+            self.db.query(ManualTask)
+            .filter(ManualTask.profile_id == self.profile_id)
+            .all()
+        )
+        for mt in manual_tasks:
+            if mt.date in timeline:
+                start_m = timestr_to_minutes(mt.start_time)
+                end_m = timestr_to_minutes(mt.end_time)
+                timeline[mt.date]["intervals"].append((start_m, end_m))
+                timeline[mt.date]["used_mins"] += mt.duration_minutes
 
         # Calculate Priority Scores and Workload for each topic
         all_topics_meta = []
@@ -523,7 +536,8 @@ class IntelligentScheduler:
             timeline=timeline,
             sessions=all_current_sessions,
             unmet_tasks=unmet_tasks,
-            topics_meta=all_topics_meta
+            topics_meta=all_topics_meta,
+            manual_tasks=manual_tasks
         )
 
         return {
@@ -566,6 +580,12 @@ class IntelligentScheduler:
             .all()
         )
 
+        manual_tasks = (
+            self.db.query(ManualTask)
+            .filter(ManualTask.profile_id == self.profile_id)
+            .all()
+        )
+
         subjects = self.db.query(Subject).filter(Subject.profile_id == self.profile_id).all()
         all_topics_meta = []
         unmet_tasks = []
@@ -593,7 +613,8 @@ class IntelligentScheduler:
             timeline=timeline,
             sessions=sessions,
             unmet_tasks=unmet_tasks,
-            topics_meta=all_topics_meta
+            topics_meta=all_topics_meta,
+            manual_tasks=manual_tasks
         )
 
     def _compute_schedule_summary(
@@ -601,10 +622,13 @@ class IntelligentScheduler:
         timeline: Dict[str, Dict[str, Any]],
         sessions: List[StudySession],
         unmet_tasks: List[Dict[str, Any]],
-        topics_meta: List[Dict[str, Any]]
+        topics_meta: List[Dict[str, Any]],
+        manual_tasks: Optional[List[ManualTask]] = None
     ) -> Dict[str, Any]:
+        manual_tasks = manual_tasks or []
         total_avail_mins = sum(d["total_avail_mins"] for d in timeline.values())
-        allocated_mins = sum(s.duration_minutes for s in sessions)
+        manual_mins_in_timeline = sum(m.duration_minutes for m in manual_tasks if m.date in timeline)
+        allocated_mins = sum(s.duration_minutes for s in sessions) + manual_mins_in_timeline
         study_mins = sum(s.duration_minutes for s in sessions if s.session_type == "study")
         practice_mins = sum(s.duration_minutes for s in sessions if s.session_type == "practice")
         revision_mins = sum(s.duration_minutes for s in sessions if s.session_type == "revision")
@@ -618,12 +642,14 @@ class IntelligentScheduler:
         daily_breakdown = {}
         for d_str, day_data in timeline.items():
             day_sessions = [s for s in sessions if s.date == d_str]
-            scheduled_m = sum(s.duration_minutes for s in day_sessions)
+            day_manual = [m for m in manual_tasks if m.date == d_str]
+            scheduled_m = sum(s.duration_minutes for s in day_sessions) + sum(m.duration_minutes for m in day_manual)
             daily_breakdown[d_str] = {
                 "day_name": day_data["day_name"],
                 "available_hours": round(day_data["total_avail_mins"] / 60.0, 1),
                 "scheduled_hours": round(scheduled_m / 60.0, 1),
-                "session_count": len(day_sessions),
+                "session_count": len(day_sessions) + len(day_manual),
+                "manual_count": len(day_manual),
                 "is_full": scheduled_m >= day_data["total_avail_mins"]
             }
 

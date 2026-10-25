@@ -15,7 +15,8 @@ import {
   createProfile, deleteProfile,
   fetchSessions, updateSession, generateSchedule, fetchScheduleSummary,
   createSubject, updateSubject, deleteSubject, createTopic, updateTopic, deleteTopic,
-  fetchAnalytics, BASE_URL
+  fetchAnalytics, BASE_URL,
+  fetchManualTasks, createManualTask, updateManualTask, deleteManualTask
 } from './api';
 
 export default function App() {
@@ -23,6 +24,7 @@ export default function App() {
   const [activeProfileId, setActiveProfileId] = useState(1);
   const [activeProfile, setActiveProfile] = useState(null);
   const [sessions, setSessions] = useState([]);
+  const [manualTasks, setManualTasks] = useState([]);
   const [summary, setSummary] = useState(null);
   const [analytics, setAnalytics] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -72,14 +74,16 @@ export default function App() {
   const loadProfileData = async (profileId) => {
     try {
       setActiveProfileId(profileId);
-      const [prof, sess, anal, schedSummary] = await Promise.all([
+      const [prof, sess, mTasks, anal, schedSummary] = await Promise.all([
         fetchProfile(profileId),
         fetchSessions(profileId),
+        fetchManualTasks(profileId).catch(() => []),
         fetchAnalytics(profileId),
         fetchScheduleSummary(profileId).catch(() => null)
       ]);
       setActiveProfile(prof);
       setSessions(sess);
+      setManualTasks(mTasks);
       setAnalytics(anal);
 
       if (schedSummary) {
@@ -119,6 +123,58 @@ export default function App() {
     }
   };
 
+  const handleCreateManualTask = async (taskData) => {
+    try {
+      const created = await createManualTask({
+        ...taskData,
+        profile_id: activeProfileId
+      });
+      setManualTasks(prev => [...prev, created]);
+      showToast(`Task "${created.title}" scheduled`);
+      fetchScheduleSummary(activeProfileId).then(s => setSummary(s)).catch(() => {});
+      return created;
+    } catch (err) {
+      showToast(`Error creating task: ${err.message}`);
+      throw err;
+    }
+  };
+
+  const handleUpdateManualTask = async (taskId, taskData) => {
+    try {
+      const updated = await updateManualTask(taskId, taskData);
+      setManualTasks(prev => prev.map(t => t.id === taskId ? updated : t));
+      showToast(`Task "${updated.title}" updated`);
+      fetchScheduleSummary(activeProfileId).then(s => setSummary(s)).catch(() => {});
+      return updated;
+    } catch (err) {
+      showToast(`Error updating task: ${err.message}`);
+      throw err;
+    }
+  };
+
+  const handleDeleteManualTask = async (taskId) => {
+    try {
+      await deleteManualTask(taskId);
+      setManualTasks(prev => prev.filter(t => t.id !== taskId));
+      showToast('Task deleted successfully');
+      fetchScheduleSummary(activeProfileId).then(s => setSummary(s)).catch(() => {});
+    } catch (err) {
+      showToast(`Error deleting task: ${err.message}`);
+      throw err;
+    }
+  };
+
+  const handleToggleManualTask = async (taskId, isCompleted) => {
+    try {
+      const status = isCompleted ? 'completed' : 'pending';
+      const updated = await updateManualTask(taskId, { is_completed: isCompleted, status });
+      setManualTasks(prev => prev.map(t => t.id === taskId ? updated : t));
+      showToast(isCompleted ? 'Task completed! 🎉' : 'Task marked pending');
+      fetchScheduleSummary(activeProfileId).then(s => setSummary(s)).catch(() => {});
+    } catch (err) {
+      showToast(`Error updating task: ${err.message}`);
+    }
+  };
 
   const handleSelectProfile = async (id) => {
     setIsLoading(true);
@@ -175,8 +231,12 @@ export default function App() {
       if (res.success) {
         setSummary(res.summary);
         setSessions(res.sessions);
-        const anal = await fetchAnalytics(activeProfileId);
+        const [anal, mTasks] = await Promise.all([
+          fetchAnalytics(activeProfileId),
+          fetchManualTasks(activeProfileId).catch(() => [])
+        ]);
         setAnalytics(anal);
+        setManualTasks(mTasks);
         showToast(res.message);
       }
     } catch (err) {
@@ -482,11 +542,17 @@ export default function App() {
           {activeTab === 'planner' && (
             <PlannerCalendar
               sessions={sessions}
-              subjects={activeProfile.subjects || []}
+              manualTasks={manualTasks}
+              subjects={activeProfile?.subjects || []}
               summary={summary}
+              activeProfile={activeProfile}
               onToggleSession={handleToggleSession}
               onRegenerate={handleRegenerate}
               isRegenerating={isRegenerating}
+              onCreateManualTask={handleCreateManualTask}
+              onUpdateManualTask={handleUpdateManualTask}
+              onDeleteManualTask={handleDeleteManualTask}
+              onToggleManualTask={handleToggleManualTask}
             />
           )}
 

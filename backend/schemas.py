@@ -140,3 +140,65 @@ class ScheduleGenerationResponse(BaseModel):
     message: str
     summary: ScheduleSummary
     sessions: List[StudySessionOut]
+
+
+# ─── Manual Task Schemas ──────────────────────────────────────────────────────
+
+VALID_CATEGORIES = {"study", "practice", "revision", "assignment", "mock_test", "custom"}
+VALID_PRIORITIES = {"low", "medium", "high", "critical"}
+
+class ManualTaskCreate(BaseModel):
+    profile_id: int
+    subject_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    title: str
+    description: Optional[str] = ""
+    category: str = "study"
+    date: str                           # YYYY-MM-DD
+    start_time: str = "09:00"
+    end_time: Optional[str] = None      # auto-computed if omitted
+    duration_minutes: int = 60
+    priority: str = "medium"
+    notes: Optional[str] = ""
+
+class ManualTaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    date: Optional[str] = None
+    start_time: Optional[str] = None
+    end_time: Optional[str] = None
+    duration_minutes: Optional[int] = None
+    priority: Optional[str] = None
+    is_completed: Optional[bool] = None
+    is_missed: Optional[bool] = None
+    status: Optional[str] = None
+    notes: Optional[str] = None
+    subject_id: Optional[int] = None
+    topic_id: Optional[int] = None
+
+class ManualTaskOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    profile_id: int
+    subject_id: Optional[int] = None
+    topic_id: Optional[int] = None
+    title: str
+    description: str = ""
+    category: str = "study"
+    date: str
+    start_time: str
+    end_time: str
+    duration_minutes: int
+    priority: str = "medium"
+    is_completed: bool = False
+    is_missed: bool = False
+    status: str = "pending"
+    completed_at: Optional[str] = None
+    notes: str = ""
+    subject_name: Optional[str] = None
+    subject_color: Optional[str] = None
+    topic_name: Optional[str] = None
+    source: str = "manual"   # Always "manual" for manual tasks
+

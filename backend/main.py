@@ -8,15 +8,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import engine, Base, get_db
-from .models import StudentProfile, Subject, Topic, StudySession
+from .models import StudentProfile, Subject, Topic, StudySession, ManualTask
 from .schemas import (
     StudentProfileOut, StudentProfileCreate, StudentProfileUpdate,
     SubjectOut, SubjectCreate, SubjectUpdate,
     TopicOut, TopicCreate, TopicUpdate,
     StudySessionOut, StudySessionCreate, StudySessionUpdate,
-    ScheduleGenerationRequest, ScheduleGenerationResponse, ScheduleSummary
+    ScheduleGenerationRequest, ScheduleGenerationResponse, ScheduleSummary,
+    ManualTaskCreate, ManualTaskUpdate, ManualTaskOut, VALID_CATEGORIES, VALID_PRIORITIES
 )
-from .scheduler import IntelligentScheduler, parse_iso_date
+from .scheduler import IntelligentScheduler, parse_iso_date, minutes_to_timestr, timestr_to_minutes
 from .demo_data import seed_demo_profiles, reset_demo_profile
 
 # Initialize tables
@@ -373,6 +374,182 @@ def update_session(session_id: int, payload: StudySessionUpdate, db: Session = D
             "topic_mastery": session.topic.mastery if session.topic else None
         }
     }
+
+# ----------------- MANUAL TASKS CRUD -----------------
+
+def format_manual_task_out(t: ManualTask) -> dict:
+    return {
+        "id": t.id,
+        "profile_id": t.profile_id,
+        "subject_id": t.subject_id,
+        "topic_id": t.topic_id,
+        "title": t.title,
+        "description": t.description or "",
+        "category": t.category or "study",
+        "date": t.date,
+        "start_time": t.start_time or "09:00",
+        "end_time": t.end_time or "10:00",
+        "duration_minutes": t.duration_minutes or 60,
+        "priority": t.priority or "medium",
+        "is_completed": bool(t.is_completed),
+        "is_missed": bool(t.is_missed),
+        "status": t.status or "pending",
+        "completed_at": t.completed_at,
+        "notes": t.notes or "",
+        "subject_name": t.subject.name if t.subject else None,
+        "subject_color": t.subject.color if t.subject else "#6366F1",
+        "topic_name": t.topic.name if t.topic else None,
+        "source": "manual"
+    }
+
+@app.get("/api/manual-tasks", response_model=List[ManualTaskOut])
+def get_manual_tasks(
+    profile_id: int = Query(...),
+    date_str: Optional[str] = Query(None),
+    date_from: Optional[str] = Query(None),
+    date_to: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    query = db.query(ManualTask).filter(ManualTask.profile_id == profile_id)
+    if date_str:
+        query = query.filter(ManualTask.date == date_str)
+    if date_from:
+        query = query.filter(ManualTask.date >= date_from)
+    if date_to:
+        query = query.filter(ManualTask.date <= date_to)
+    tasks = query.order_by(ManualTask.date, ManualTask.start_time).all()
+    return [format_manual_task_out(t) for t in tasks]
+
+@app.post("/api/manual-tasks", response_model=ManualTaskOut, status_code=status.HTTP_201_CREATED)
+def create_manual_task(payload: ManualTaskCreate, db: Session = Depends(get_db)):
+    profile = db.query(StudentProfile).filter(StudentProfile.id == payload.profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student profile not found")
+        
+    if payload.subject_id:
+        sub = db.query(Subject).filter(Subject.id == payload.subject_id, Subject.profile_id == payload.profile_id).first()
+        if not sub:
+            raise HTTPException(status_code=400, detail="Invalid subject ID for this profile")
+    if payload.topic_id:
+        top = db.query(Topic).filter(Topic.id == payload.topic_id).first()
+        if not top:
+            raise HTTPException(status_code=400, detail="Invalid topic ID")
+
+    start_min = timestr_to_minutes(payload.start_time or "09:00")
+    duration = max(5, int(payload.duration_minutes or 60))
+    end_time_str = payload.end_time
+    if not end_time_str:
+        end_time_str = minutes_to_timestr(start_min + duration)
+
+    task = ManualTask(
+        profile_id=payload.profile_id,
+        subject_id=payload.subject_id,
+        topic_id=payload.topic_id,
+        title=payload.title.strip() if payload.title else "Untitled Task",
+        description=payload.description or "",
+        category=payload.category if payload.category in VALID_CATEGORIES else "study",
+        date=payload.date,
+        start_time=payload.start_time or "09:00",
+        end_time=end_time_str,
+        duration_minutes=duration,
+        priority=payload.priority if payload.priority in VALID_PRIORITIES else "medium",
+        is_completed=False,
+        is_missed=False,
+        status="pending",
+        notes=payload.notes or ""
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    return format_manual_task_out(task)
+
+@app.get("/api/manual-tasks/{task_id}", response_model=ManualTaskOut)
+def get_manual_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(ManualTask).filter(ManualTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Manual task not found")
+    return format_manual_task_out(task)
+
+@app.put("/api/manual-tasks/{task_id}", response_model=ManualTaskOut)
+def update_manual_task(task_id: int, payload: ManualTaskUpdate, db: Session = Depends(get_db)):
+    task = db.query(ManualTask).filter(ManualTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Manual task not found")
+        
+    if payload.title is not None:
+        task.title = payload.title.strip() or task.title
+    if payload.description is not None:
+        task.description = payload.description
+    if payload.category is not None and payload.category in VALID_CATEGORIES:
+        task.category = payload.category
+    if payload.date is not None:
+        task.date = payload.date
+    if payload.start_time is not None:
+        task.start_time = payload.start_time
+    if payload.duration_minutes is not None:
+        task.duration_minutes = max(5, int(payload.duration_minutes))
+    if payload.end_time is not None:
+        task.end_time = payload.end_time
+    elif payload.start_time is not None or payload.duration_minutes is not None:
+        start_m = timestr_to_minutes(task.start_time)
+        task.end_time = minutes_to_timestr(start_m + task.duration_minutes)
+
+    if payload.priority is not None and payload.priority in VALID_PRIORITIES:
+        task.priority = payload.priority
+    if payload.notes is not None:
+        task.notes = payload.notes
+    if payload.subject_id is not None:
+        task.subject_id = payload.subject_id if payload.subject_id > 0 else None
+    if payload.topic_id is not None:
+        task.topic_id = payload.topic_id if payload.topic_id > 0 else None
+
+    # Handle completion status
+    if payload.status is not None:
+        if payload.status == "completed":
+            task.is_completed = True
+            task.is_missed = False
+            task.status = "completed"
+            task.completed_at = date.today().isoformat()
+        elif payload.status == "missed":
+            task.is_completed = False
+            task.is_missed = True
+            task.status = "missed"
+            task.completed_at = None
+        else:
+            task.is_completed = False
+            task.is_missed = False
+            task.status = "pending"
+            task.completed_at = None
+    elif payload.is_completed is not None:
+        task.is_completed = payload.is_completed
+        if payload.is_completed:
+            task.is_missed = False
+            task.status = "completed"
+            task.completed_at = date.today().isoformat()
+        else:
+            task.status = "pending"
+            task.completed_at = None
+    elif payload.is_missed is not None:
+        task.is_missed = payload.is_missed
+        if payload.is_missed:
+            task.is_completed = False
+            task.status = "missed"
+            task.completed_at = None
+        else:
+            task.status = "pending"
+
+    db.commit()
+    db.refresh(task)
+    return format_manual_task_out(task)
+
+@app.delete("/api/manual-tasks/{task_id}")
+def delete_manual_task(task_id: int, db: Session = Depends(get_db)):
+    task = db.query(ManualTask).filter(ManualTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Manual task not found")
+    db.delete(task)
+    db.commit()
+    return {"success": True, "message": f"Manual task '{task.title}' deleted successfully", "id": task_id}
 
 # ----------------- SCHEDULER & REGENERATION -----------------
 

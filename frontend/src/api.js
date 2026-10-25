@@ -178,3 +178,53 @@ export async function runAutomatedTests() {
   if (!res.ok) throw new Error('Failed to run test suite');
   return res.json();
 }
+
+// ----------------- Manual Tasks -----------------
+
+export async function fetchManualTasks(profileId, dateFrom = null, dateTo = null, dateStr = null) {
+  let url = `${BASE_URL}/manual-tasks?profile_id=${profileId}`;
+  if (dateStr) url += `&date_str=${dateStr}`;
+  if (dateFrom) url += `&date_from=${dateFrom}`;
+  if (dateTo) url += `&date_to=${dateTo}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('Failed to load manual tasks');
+  return res.json();
+}
+
+export async function createManualTask(data) {
+  const res = await fetch(`${BASE_URL}/manual-tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to create manual task');
+  }
+  return res.json();
+}
+
+export async function updateManualTask(taskId, data) {
+  const res = await fetch(`${BASE_URL}/manual-tasks/${taskId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to update manual task');
+  }
+  return res.json();
+}
+
+export async function deleteManualTask(taskId) {
+  const res = await fetch(`${BASE_URL}/manual-tasks/${taskId}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to delete manual task');
+  }
+  return res.json();
+}
+
