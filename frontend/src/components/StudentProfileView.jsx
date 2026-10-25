@@ -1,11 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   GraduationCap, Clock, BookOpen, Plus, Trash2, Calendar, 
-  Sparkles, Save, CheckCircle, RefreshCw, AlertCircle, Edit3, X, Check
+  Sparkles, Save, CheckCircle, RefreshCw, AlertCircle, Edit3, X, Check,
+  UserPlus
 } from 'lucide-react';
 
 export default function StudentProfileView({
   profile,
+  profilesCount = 1,
   onUpdateProfile,
   onCreateSubject,
   onUpdateSubject,
@@ -13,7 +15,9 @@ export default function StudentProfileView({
   onCreateTopic,
   onUpdateTopic,
   onDeleteTopic,
-  onRegenerate
+  onRegenerate,
+  onOpenCreateModal,
+  onDeleteProfile
 }) {
   const [studentName, setStudentName] = useState(profile?.name || 'Govind Innani');
   const [studentEmail, setStudentEmail] = useState(profile?.email || 'govind.innani@vit.ac.in');
@@ -27,6 +31,21 @@ export default function StudentProfileView({
       return { Monday: 3.0, Tuesday: 2.5, Wednesday: 3.0, Thursday: 2.5, Friday: 4.0, Saturday: 5.0, Sunday: 4.0 };
     }
   });
+
+  // Reactive state synchronization when active student profile changes
+  useEffect(() => {
+    if (profile) {
+      setStudentName(profile.name || '');
+      setStudentEmail(profile.email || '');
+      setTargetExam(profile.target_exam || '');
+      setPreferredMinutes(profile.preferred_session_minutes || 60);
+      try {
+        setDailyAvail(JSON.parse(profile.daily_availability_json || '{}'));
+      } catch {
+        setDailyAvail({ Monday: 3.0, Tuesday: 2.5, Wednesday: 3.0, Thursday: 2.5, Friday: 4.0, Saturday: 5.0, Sunday: 4.0 });
+      }
+    }
+  }, [profile?.id, profile?.updated_at]);
 
   const [newSubjectName, setNewSubjectName] = useState('');
   const [newSubjectCode, setNewSubjectCode] = useState('');
@@ -158,7 +177,28 @@ export default function StudentProfileView({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2.5">
+          {onOpenCreateModal && (
+            <button
+              onClick={onOpenCreateModal}
+              className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition-all cursor-pointer"
+            >
+              <UserPlus className="w-3.5 h-3.5 text-indigo-400" />
+              <span>+ Add Student</span>
+            </button>
+          )}
+
+          {onDeleteProfile && profilesCount > 1 && (
+            <button
+              onClick={() => onDeleteProfile(profile.id)}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 text-xs font-semibold border border-red-500/20 transition-all cursor-pointer"
+              title="Delete this student profile and its curriculum"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Delete Student</span>
+            </button>
+          )}
+
           <button
             onClick={handleSaveProfile}
             disabled={isSaving}

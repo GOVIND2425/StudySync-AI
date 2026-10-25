@@ -136,22 +136,52 @@ export default function Dashboard({
         <div className="absolute -bottom-24 -left-24 w-80 h-80 rounded-full bg-violet-600/15 blur-3xl pointer-events-none" />
       </motion.div>
 
-      {/* Capacity Deficit Warning */}
-      {summary?.has_capacity_deficit && (
+      {/* Capacity Deficit / Backlog Explanation Banner */}
+      {summary?.has_capacity_deficit ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.97 }}
           animate={{ opacity: 1, scale: 1 }}
           className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-xs flex items-start gap-3 shadow-lg"
         >
           <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="font-semibold text-amber-300 text-sm">
-              Study Capacity Constrained — {summary.capacity_deficit_hours}h deficit
+          <div className="space-y-1.5 flex-1">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="font-semibold text-amber-300 text-sm">
+                Study Capacity Constrained — {summary.capacity_deficit_hours}h Backlog Deficit
+              </div>
+              <div className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
+                {summary.allocated_hours}h scheduled / {summary.total_available_hours}h weekly availability
+              </div>
             </div>
-            <p className="text-amber-200/90 leading-relaxed">
-              Available hours are below optimal workload. StudySync AI has capped the schedule to prevent burnout, prioritising highest-yield topics.
+            <p className="text-amber-200/90 leading-relaxed text-xs">
+              Required topic workload exceeds available study capacity before deadlines. StudySync AI has capped the 7-day schedule to prevent burnout, strictly prioritizing high-yield topics.
             </p>
+            {summary.unmet_topics && summary.unmet_topics.length > 0 && (
+              <div className="text-[11px] text-amber-300/90 pt-0.5">
+                <span className="font-semibold">Unscheduled Topics with Remaining Workload: </span>
+                <span className="font-medium text-amber-100">{summary.unmet_topics.join(', ')}</span>
+              </div>
+            )}
+            <div className="text-[10px] text-amber-400/80 italic">
+              Recommendation: Increase daily availability in Curriculum Profile or adjust assessment dates to accommodate remaining backlog.
+            </div>
           </div>
+        </motion.div>
+      ) : summary && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="p-3.5 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-200 text-xs flex items-center justify-between shadow-sm"
+        >
+          <div className="flex items-center gap-2.5">
+            <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+            <span className="font-medium text-emerald-300">
+              Optimal Workload Balance — 100% of required curriculum scheduled within weekly capacity (0.0h deficit).
+            </span>
+          </div>
+          <span className="text-[11px] font-mono text-emerald-400/80">
+            {summary.allocated_hours}h / {summary.total_available_hours}h ({summary.utilization_rate}% utilized)
+          </span>
         </motion.div>
       )}
 

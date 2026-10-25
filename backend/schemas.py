@@ -92,11 +92,11 @@ class StudySessionOut(StudySessionBase):
     topic_name: Optional[str] = None
 
 class StudentProfileBase(BaseModel):
-    name: str = "Govind Innani"
-    email: str = "govind.innani@vit.ac.in"
-    target_exam: str = "VIT End-Semester Exam 2026"
-    preferred_session_minutes: int = 60
-    daily_availability_json: str = '{"Monday": 3.0, "Tuesday": 2.5, "Wednesday": 3.0, "Thursday": 2.5, "Friday": 4.0, "Saturday": 5.0, "Sunday": 4.0}'
+    name: str
+    email: Optional[str] = None
+    target_exam: Optional[str] = "End-Semester Examination"
+    preferred_session_minutes: Optional[int] = 60
+    daily_availability_json: Optional[str] = '{"Monday": 3.0, "Tuesday": 2.5, "Wednesday": 3.0, "Thursday": 2.5, "Friday": 4.0, "Saturday": 5.0, "Sunday": 4.0}'
 
 class StudentProfileCreate(StudentProfileBase):
     pass

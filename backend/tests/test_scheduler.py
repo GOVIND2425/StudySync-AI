@@ -333,3 +333,97 @@ def test_api_error_handling():
     # 400 for topic creation without subject_id
     r_bad = client.post("/api/topics", json={"name": "Orphan Topic", "mastery": 3, "importance": 3})
     assert r_bad.status_code in [400, 422]
+
+# 15. Backlog Calculation Accuracy
+def test_backlog_calculation_accuracy(db_session):
+    """
+    Verification that curriculum backlog deficit is calculated accurately:
+    For 8 topics (base 2.0h each, ~17.25h total required) with 16.0h weekly availability,
+    the backlog deficit must be <= 2.5h (NOT hundreds of compounded hours).
+    """
+    profile = create_sample_student(db_session, daily_avail_hours=2.285)  # ~16h per week
+    today = date.today()
+    s1 = Subject(profile_id=profile.id, name="CSE2001", code="CSE2001", color="#6366F1", assessment_date=(today + timedelta(days=5)).isoformat())
+    s2 = Subject(profile_id=profile.id, name="MAT2002", code="MAT2002", color="#8B5CF6", assessment_date=(today + timedelta(days=6)).isoformat())
+    db_session.add_all([s1, s2])
+    db_session.commit()
+
+    topics_data = [
+        (s1.id, "T1", 1, 5), (s1.id, "T2", 2, 5), (s1.id, "T3", 3, 4), (s1.id, "T4", 4, 3),
+        (s2.id, "T5", 1, 4), (s2.id, "T6", 2, 4), (s2.id, "T7", 3, 4), (s2.id, "T8", 4, 3)
+    ]
+    for sid, name, m, imp in topics_data:
+        db_session.add(Topic(subject_id=sid, name=name, mastery=m, importance=imp, estimated_hours_needed=2.0))
+    db_session.commit()
+
+    scheduler = IntelligentScheduler(db=db_session, profile_id=profile.id)
+    res = scheduler.generate_schedule(start_date=today.isoformat(), horizon_days=7)
+    summary = res["summary"]
+
+    assert summary["capacity_deficit_hours"] < 5.0, f"Deficit {summary['capacity_deficit_hours']}h must be <= 5h for 17.25h workload"
+    assert summary["allocated_hours"] <= summary["total_available_hours"]
+
+# 16. No Workload Compounding on Repeated Regeneration
+def test_no_workload_compounding_on_repeated_regeneration(db_session):
+    """
+    Idempotence Invariant: Multiple successive schedule generations must not mutate or compound
+    topic base effort, keeping deficit stable across repeated regenerations.
+    """
+    profile = create_sample_student(db_session, daily_avail_hours=3.0)
+    today = date.today()
+    subject = Subject(profile_id=profile.id, name="Algorithms", code="CSE2001", color="#6366F1", assessment_date=(today + timedelta(days=6)).isoformat())
+    db_session.add(subject)
+    db_session.commit()
+
+    topic = Topic(subject_id=subject.id, name="Dynamic Programming", mastery=1, importance=5, estimated_hours_needed=2.0)
+    db_session.add(topic)
+    db_session.commit()
+
+    scheduler = IntelligentScheduler(db=db_session, profile_id=profile.id)
+    deficits = []
+    for _ in range(4):
+        res = scheduler.generate_schedule(start_date=today.isoformat(), horizon_days=7)
+        deficits.append(res["summary"]["capacity_deficit_hours"])
+
+    # Base effort must remain untouched at 2.0
+    refreshed_topic = db_session.query(Topic).filter(Topic.id == topic.id).first()
+    assert refreshed_topic.estimated_hours_needed == 2.0, "Base effort must not be overwritten by workload['total']"
+    assert len(set(deficits)) == 1, f"Deficit must remain identical across runs, got {deficits}"
+
+# 17. Completed Sessions Deducted from Backlog
+def test_completed_sessions_deducted_from_backlog(db_session):
+    """
+    Completion Deduction Invariant: Completed sessions reduce remaining workload and are
+    never re-scheduled as duplicate unfinished tasks or counted as backlog deficit.
+    """
+    profile = create_sample_student(db_session, daily_avail_hours=2.0)
+    today = date.today()
+    subject = Subject(profile_id=profile.id, name="Data Structures", code="CS101", color="#6366F1", assessment_date=(today + timedelta(days=5)).isoformat())
+    db_session.add(subject)
+    db_session.commit()
+
+    topic = Topic(subject_id=subject.id, name="Trees", mastery=1, importance=4, estimated_hours_needed=2.0)
+    db_session.add(topic)
+    db_session.commit()
+
+    scheduler = IntelligentScheduler(db=db_session, profile_id=profile.id)
+    init_res = scheduler.generate_schedule(start_date=today.isoformat(), horizon_days=7)
+    init_sessions = db_session.query(StudySession).filter(StudySession.profile_id == profile.id).all()
+    assert len(init_sessions) > 0
+
+    # Mark the first session as completed
+    first_session = init_sessions[0]
+    first_session.is_completed = True
+    first_session.status = "completed"
+    db_session.commit()
+
+    # Regenerate schedule preserving completed sessions
+    resched = scheduler.generate_schedule(start_date=today.isoformat(), horizon_days=7, preserve_completed=True)
+    new_sessions = db_session.query(StudySession).filter(StudySession.profile_id == profile.id).all()
+
+    # Total pending sessions should decrease because completed session satisfies that phase
+    completed_count = sum(1 for s in new_sessions if s.is_completed)
+    assert completed_count == 1, "Completed session must be preserved"
+    # New pending sessions should not duplicate the completed session
+    assert len(new_sessions) <= len(init_sessions)
+

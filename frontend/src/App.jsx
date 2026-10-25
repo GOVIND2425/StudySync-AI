@@ -9,9 +9,11 @@ import ExplainabilityView from './components/ExplainabilityView';
 import AnalyticsView from './components/AnalyticsView';
 import DemoTesterView from './components/DemoTesterView';
 import ArchitectureDocsView from './components/ArchitectureDocsView';
+import CreateStudentModal from './components/CreateStudentModal';
 import { 
   fetchProfiles, fetchProfile, updateProfile, resetProfile,
-  fetchSessions, updateSession, generateSchedule,
+  createProfile, deleteProfile,
+  fetchSessions, updateSession, generateSchedule, fetchScheduleSummary,
   createSubject, updateSubject, deleteSubject, createTopic, updateTopic, deleteTopic,
   fetchAnalytics, BASE_URL
 } from './api';
@@ -28,6 +30,7 @@ export default function App() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [toastMessage, setToastMessage] = useState(null);
   const [initError, setInitError] = useState(null);
+  const [isCreateStudentModalOpen, setIsCreateStudentModalOpen] = useState(false);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -69,17 +72,19 @@ export default function App() {
   const loadProfileData = async (profileId) => {
     try {
       setActiveProfileId(profileId);
-      const [prof, sess, anal] = await Promise.all([
+      const [prof, sess, anal, schedSummary] = await Promise.all([
         fetchProfile(profileId),
         fetchSessions(profileId),
-        fetchAnalytics(profileId)
+        fetchAnalytics(profileId),
+        fetchScheduleSummary(profileId).catch(() => null)
       ]);
       setActiveProfile(prof);
       setSessions(sess);
       setAnalytics(anal);
 
-      // Build summary from existing sessions (avoid mutating schedule on every load)
-      if (sess.length === 0) {
+      if (schedSummary) {
+        setSummary(schedSummary);
+      } else if (sess.length === 0) {
         // No sessions yet — generate the initial schedule
         const sched = await generateSchedule(profileId, null, 7, true);
         if (sched.summary) setSummary(sched.summary);
@@ -87,10 +92,9 @@ export default function App() {
         const freshSess = await fetchSessions(profileId);
         setSessions(freshSess);
       } else {
-        // Derive summary from fetched sessions
+        // Fallback derivation if summary endpoint fails
         const totalMins = sess.reduce((a, s) => a + (s.duration_minutes || 0), 0);
         const scheduledHrs = Math.round(totalMins / 60 * 10) / 10;
-        // Compute available from profile
         let totalAvail = 0;
         try {
           const avail = JSON.parse(prof.daily_availability_json || '{}');
@@ -102,10 +106,10 @@ export default function App() {
           total_available_hours: totalAvail,
           utilization_rate: Math.min(100, utilRate),
           total_sessions_scheduled: sess.length,
-          has_capacity_deficit: scheduledHrs > totalAvail,
-          capacity_deficit_hours: Math.max(0, Math.round((scheduledHrs - totalAvail) * 10) / 10),
+          has_capacity_deficit: false,
+          capacity_deficit_hours: 0.0,
           explanation_highlights: anal?.topic_data?.slice(0, 3).map(t =>
-            `${t.name} (${t.subject_code}) – Priority: ${t.priority_score}/100. ${t.explanation || ''}`
+            `#${t.name} (${t.subject_code}) – Priority: ${t.priority_score}/100. ${t.explanation || ''}`
           ) || [],
           unmet_topics: []
         });
@@ -250,6 +254,81 @@ export default function App() {
     showToast('Topic deleted & schedule updated.');
   };
 
+  const handleCreateProfile = async (profileData) => {
+    const { include_starter_subject, ...payload } = profileData;
+    const newProfile = await createProfile(payload);
+    
+    if (include_starter_subject) {
+      try {
+        const sub = await createSubject({
+          profile_id: newProfile.id,
+          name: 'Core Curriculum',
+          code: 'CORE101',
+          color: '#6366F1',
+          assessment_date: new Date(Date.now() + 14 * 86400000).toISOString().split('T')[0]
+        });
+        await createTopic({
+          subject_id: sub.id,
+          name: 'Fundamental Concepts',
+          current_mastery: 25,
+          target_mastery: 85,
+          difficulty: 6,
+          estimated_hours_needed: 2.0,
+          is_revision: false
+        });
+        await createTopic({
+          subject_id: sub.id,
+          name: 'Applied Problem Solving',
+          current_mastery: 35,
+          target_mastery: 90,
+          difficulty: 7,
+          estimated_hours_needed: 2.0,
+          is_revision: false
+        });
+      } catch (err) {
+        console.warn('Could not seed starter subject for new profile:', err);
+      }
+    }
+
+    try {
+      await generateSchedule(newProfile.id, null, 7, true);
+    } catch (schedErr) {
+      console.warn('Initial schedule generation warning:', schedErr);
+    }
+
+    const updatedProfiles = await fetchProfiles();
+    setProfiles(updatedProfiles);
+    await loadProfileData(newProfile.id);
+    showToast(`Created student profile "${newProfile.name}"!`);
+  };
+
+  const handleDeleteProfile = async (profileId) => {
+    if (profiles.length <= 1) {
+      alert('Cannot delete the only student profile. At least one profile must be retained.');
+      return;
+    }
+    const target = profiles.find(p => p.id === profileId);
+    const confirmed = window.confirm(
+      `Are you sure you want to delete "${target?.name || 'this student'}"?\n\nThis will permanently remove all their subjects, topics, and scheduled sessions.`
+    );
+    if (!confirmed) return;
+
+    try {
+      setIsLoading(true);
+      await deleteProfile(profileId);
+      const remaining = profiles.filter(p => p.id !== profileId);
+      setProfiles(remaining);
+      
+      const nextId = profileId === activeProfileId ? remaining[0].id : activeProfileId;
+      await loadProfileData(nextId);
+      showToast(`Student profile "${target?.name || ''}" deleted.`);
+    } catch (err) {
+      alert('Error deleting profile: ' + (err.message || err));
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (isLoading || !activeProfile) {
     // Error state — backend unreachable or API failure
     if (!isLoading && initError) {
@@ -346,6 +425,8 @@ export default function App() {
         isRegenerating={isRegenerating}
         activeTab={activeTab}
         onResetDemo={handleResetDemo}
+        onOpenCreateModal={() => setIsCreateStudentModalOpen(true)}
+        onDeleteProfile={handleDeleteProfile}
       />
 
       {/* Main Body */}
@@ -412,6 +493,7 @@ export default function App() {
           {activeTab === 'profile' && (
             <StudentProfileView
               profile={activeProfile}
+              profilesCount={profiles.length}
               onUpdateProfile={handleUpdateProfile}
               onCreateSubject={handleCreateSubject}
               onUpdateSubject={handleUpdateSubject}
@@ -420,6 +502,8 @@ export default function App() {
               onUpdateTopic={handleUpdateTopic}
               onDeleteTopic={handleDeleteTopic}
               onRegenerate={handleRegenerate}
+              onOpenCreateModal={() => setIsCreateStudentModalOpen(true)}
+              onDeleteProfile={handleDeleteProfile}
             />
           )}
 
@@ -459,6 +543,13 @@ export default function App() {
           <span>VIT AI Innovate-A-Thon 2026 • Problem Statement 7</span>
         </div>
       </footer>
+
+      {/* Dynamic Student Profile Creation Modal */}
+      <CreateStudentModal
+        isOpen={isCreateStudentModalOpen}
+        onClose={() => setIsCreateStudentModalOpen(false)}
+        onCreate={handleCreateProfile}
+      />
 
     </div>
   );

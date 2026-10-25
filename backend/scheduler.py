@@ -270,31 +270,75 @@ class IntelligentScheduler:
             for topic in subject.topics:
                 days_left = (deadline - today).days
 
-                # Calculate unfinished workload
-                completed_topic_mins = sum(
-                    cs.duration_minutes for cs in completed_sessions if cs.topic_id == topic.id
+                # Base estimated effort (safeguard against legacy inflated values from earlier compounding bug)
+                base_effort = float(topic.estimated_hours_needed or 2.0)
+                if base_effort > 20.0:
+                    base_effort = 2.0
+                    topic.estimated_hours_needed = 2.0
+
+                # Compute target workload for the topic
+                workload = calculate_topic_workload(
+                    mastery=topic.mastery,
+                    importance=topic.importance,
+                    estimated_effort_hours=base_effort
                 )
-                effort_hours = topic.estimated_hours_needed or 2.0
-                unfinished_hours = max(0.0, effort_hours - (completed_topic_mins / 60.0))
+
+                target_study_mins = int(workload["study"] * 60)
+                target_practice_mins = int(workload["practice"] * 60)
+                target_revision_mins = int(workload["revision"] * 60)
+                total_target_mins = int(workload["total"] * 60)
+
+                # Calculate minutes completed for this topic (prevent double-counting)
+                completed_study_mins = sum(
+                    cs.duration_minutes for cs in completed_sessions 
+                    if cs.topic_id == topic.id and cs.session_type == "study"
+                )
+                completed_practice_mins = sum(
+                    cs.duration_minutes for cs in completed_sessions 
+                    if cs.topic_id == topic.id and cs.session_type == "practice"
+                )
+                completed_revision_mins = sum(
+                    cs.duration_minutes for cs in completed_sessions 
+                    if cs.topic_id == topic.id and cs.session_type == "revision"
+                )
+                total_completed_topic_mins = sum(
+                    cs.duration_minutes for cs in completed_sessions 
+                    if cs.topic_id == topic.id
+                )
+
+                # Subtract completed minutes from each pedagogical phase
+                rem_study_mins = max(0, target_study_mins - completed_study_mins)
+                rem_practice_mins = max(0, target_practice_mins - completed_practice_mins)
+                rem_revision_mins = max(0, target_revision_mins - completed_revision_mins)
+
+                # Ensure remaining phase sum strictly reflects unfinished requirement
+                net_remaining_mins = max(0, total_target_mins - total_completed_topic_mins)
+                phase_sum = rem_study_mins + rem_practice_mins + rem_revision_mins
+                if phase_sum > net_remaining_mins and phase_sum > 0:
+                    ratio = net_remaining_mins / phase_sum
+                    rem_study_mins = int(rem_study_mins * ratio)
+                    rem_practice_mins = int(rem_practice_mins * ratio)
+                    rem_revision_mins = max(0, net_remaining_mins - (rem_study_mins + rem_practice_mins))
+                elif net_remaining_mins == 0:
+                    rem_study_mins = 0
+                    rem_practice_mins = 0
+                    rem_revision_mins = 0
+
+                unfinished_hours = round(net_remaining_mins / 60.0, 2)
 
                 score, explanation, factors = calculate_priority(
                     mastery=topic.mastery,
                     importance=topic.importance,
                     days_to_deadline=days_left,
-                    estimated_hours_needed=effort_hours,
+                    estimated_hours_needed=base_effort,
                     unfinished_workload_hours=unfinished_hours
-                )
-
-                workload = calculate_topic_workload(
-                    mastery=topic.mastery,
-                    importance=topic.importance,
-                    estimated_effort_hours=effort_hours
                 )
 
                 topic.priority_score = score
                 topic.explanation = explanation
                 topic.explanation_factors_json = json.dumps(factors)
-                topic.estimated_hours_needed = workload["total"]
+                # DO NOT overwrite topic.estimated_hours_needed with workload["total"]!
+                # Base effort must remain stable to prevent geometric workload duplication.
 
                 all_topics_meta.append({
                     "topic": topic,
@@ -304,7 +348,13 @@ class IntelligentScheduler:
                     "priority_score": score,
                     "explanation": explanation,
                     "workload": workload,
-                    "unfinished_hours": unfinished_hours
+                    "unfinished_hours": unfinished_hours,
+                    "remaining_phases": {
+                        "study": rem_study_mins,
+                        "practice": rem_practice_mins,
+                        "revision": rem_revision_mins,
+                        "total_mins": net_remaining_mins
+                    }
                 })
 
         self.db.commit()
@@ -312,22 +362,22 @@ class IntelligentScheduler:
         # Sort topics descending by priority score
         all_topics_meta.sort(key=lambda x: x["priority_score"], reverse=True)
 
-        # Prepare granular session tasks
+        # Prepare granular session tasks ONLY for remaining unfinished workload
         session_tasks = []
         for item in all_topics_meta:
             topic = item["topic"]
             subject = item["subject"]
             deadline = item["deadline"]
-            workload = item["workload"]
+            rem_phases = item["remaining_phases"]
 
             phases = [
-                ("study", workload["study"], f"Deep Concept Study: {topic.name}"),
-                ("practice", workload["practice"], f"Applied Problem Practice: {topic.name}"),
-                ("revision", workload["revision"], f"High-Yield Spaced Revision: {topic.name}")
+                ("study", rem_phases["study"], f"Deep Concept Study: {topic.name}"),
+                ("practice", rem_phases["practice"], f"Applied Problem Practice: {topic.name}"),
+                ("revision", rem_phases["revision"], f"High-Yield Spaced Revision: {topic.name}")
             ]
 
-            for stype, hours, title in phases:
-                remaining_mins = int(hours * 60)
+            for stype, rem_mins, title in phases:
+                remaining_mins = rem_mins
                 seq_idx = 1
                 while remaining_mins > 0:
                     chunk = min(remaining_mins, preferred_session_mins)
@@ -482,6 +532,69 @@ class IntelligentScheduler:
             "summary": summary,
             "sessions": [self._format_session_out(s) for s in all_current_sessions]
         }
+
+    def get_current_summary(self, horizon_days: int = 7) -> Dict[str, Any]:
+        """
+        Computes the current schedule summary (allocated hours, available capacity,
+        true backlog deficit) from current sessions and topics without modifying the schedule.
+        """
+        profile = self.db.query(StudentProfile).filter(StudentProfile.id == self.profile_id).first()
+        if not profile:
+            return self._empty_summary()
+
+        today = date.today()
+        try:
+            daily_avail = json.loads(profile.daily_availability_json)
+        except Exception:
+            daily_avail = {}
+
+        timeline: Dict[str, Dict[str, Any]] = {}
+        for d in range(horizon_days):
+            current_day = today + timedelta(days=d)
+            day_name = WEEKDAYS[current_day.weekday()]
+            avail_hours = float(daily_avail.get(day_name, 3.0))
+            timeline[current_day.isoformat()] = {
+                "date": current_day,
+                "day_name": day_name,
+                "total_avail_mins": int(avail_hours * 60)
+            }
+
+        sessions = (
+            self.db.query(StudySession)
+            .filter(StudySession.profile_id == self.profile_id)
+            .order_by(StudySession.date, StudySession.start_time)
+            .all()
+        )
+
+        subjects = self.db.query(Subject).filter(Subject.profile_id == self.profile_id).all()
+        all_topics_meta = []
+        unmet_tasks = []
+
+        for sub in subjects:
+            for t in sub.topics:
+                base_effort = float(t.estimated_hours_needed or 2.0)
+                workload = calculate_topic_workload(t.mastery, t.importance, base_effort)
+                t_sessions = [s for s in sessions if s.topic_id == t.id]
+                scheduled_mins = sum(s.duration_minutes for s in t_sessions)
+                target_total_mins = int(workload["total"] * 60)
+                if scheduled_mins < target_total_mins:
+                    unmet_tasks.append({
+                        "topic_name": t.name,
+                        "duration_minutes": target_total_mins - scheduled_mins
+                    })
+                all_topics_meta.append({
+                    "topic": t,
+                    "priority_score": t.priority_score or 50.0,
+                    "explanation": t.explanation or "",
+                    "workload": workload
+                })
+
+        return self._compute_schedule_summary(
+            timeline=timeline,
+            sessions=sessions,
+            unmet_tasks=unmet_tasks,
+            topics_meta=all_topics_meta
+        )
 
     def _compute_schedule_summary(
         self,

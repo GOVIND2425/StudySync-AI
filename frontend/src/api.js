@@ -39,6 +39,30 @@ export async function updateProfile(id, data) {
   return res.json();
 }
 
+export async function createProfile(data) {
+  const res = await fetch(`${BASE_URL}/profiles`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to create student profile');
+  }
+  return res.json();
+}
+
+export async function deleteProfile(id) {
+  const res = await fetch(`${BASE_URL}/profiles/${id}`, {
+    method: 'DELETE'
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to delete student profile');
+  }
+  return res.json();
+}
+
 export async function resetProfile(id) {
   const res = await fetch(`${BASE_URL}/profiles/${id}/reset`, {
     method: 'POST'
@@ -78,6 +102,12 @@ export async function generateSchedule(profileId, startDate = null, horizonDays 
     })
   });
   if (!res.ok) throw new Error('Failed to generate schedule');
+  return res.json();
+}
+
+export async function fetchScheduleSummary(profileId) {
+  const res = await fetch(`${BASE_URL}/schedule/summary/${profileId}`);
+  if (!res.ok) throw new Error('Failed to load schedule summary');
   return res.json();
 }
 

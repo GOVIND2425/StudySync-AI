@@ -86,10 +86,14 @@ export default function Sidebar({ activeTab, setActiveTab, summary }) {
               <span>Cap: <strong className="text-slate-200">{summary.total_available_hours}h</strong></span>
             </div>
 
-            {summary.has_capacity_deficit && (
+            {summary.has_capacity_deficit ? (
               <div className="mt-3 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[11px] flex items-start gap-1.5">
                 <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-400" />
                 <span>Deficit: {summary.capacity_deficit_hours}h backlogged</span>
+              </div>
+            ) : (
+              <div className="mt-3 p-1.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] flex items-center justify-center gap-1 font-medium">
+                <span>✓ Fully Scheduled (0h deficit)</span>
               </div>
             )}
           </motion.div>

@@ -3,7 +3,7 @@ import json
 import subprocess
 from datetime import date, timedelta
 from typing import List, Optional
-from fastapi import FastAPI, Depends, HTTPException, Query
+from fastapi import FastAPI, Depends, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
@@ -129,8 +129,45 @@ def update_profile(profile_id: int, payload: StudentProfileUpdate, db: Session =
     db.refresh(profile)
     return profile
 
+@app.post("/api/profiles", response_model=StudentProfileOut, status_code=status.HTTP_201_CREATED)
+def create_profile(payload: StudentProfileCreate, db: Session = Depends(get_db)):
+    if not payload.name or not payload.name.strip():
+        raise HTTPException(status_code=400, detail="Student name is required")
+    
+    clean_name = payload.name.strip()
+    clean_email = payload.email.strip() if payload.email and payload.email.strip() else f"{clean_name.lower().replace(' ', '.')}@student.ac.in"
+    
+    profile = StudentProfile(
+        name=clean_name,
+        email=clean_email,
+        target_exam=payload.target_exam or "End-Semester Examination",
+        preferred_session_minutes=payload.preferred_session_minutes or 60,
+        daily_availability_json=payload.daily_availability_json or '{"Monday": 3.0, "Tuesday": 2.5, "Wednesday": 3.0, "Thursday": 2.5, "Friday": 4.0, "Saturday": 5.0, "Sunday": 4.0}'
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+@app.delete("/api/profiles/{profile_id}")
+def delete_profile(profile_id: int, db: Session = Depends(get_db)):
+    profile = db.query(StudentProfile).filter(StudentProfile.id == profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student profile not found")
+        
+    count = db.query(StudentProfile).count()
+    if count <= 1:
+        raise HTTPException(status_code=400, detail="Cannot delete the only remaining profile. At least one profile must exist.")
+        
+    deleted_name = profile.name
+    db.delete(profile)
+    db.commit()
+    return {"success": True, "message": f"Student profile '{deleted_name}' (ID {profile_id}) deleted successfully"}
+
 @app.post("/api/profiles/{profile_id}/reset")
 def reset_profile(profile_id: int, db: Session = Depends(get_db)):
+    if profile_id not in [1, 2, 3]:
+        raise HTTPException(status_code=400, detail="Only predefined demo profiles (IDs 1, 2, 3) can be reset to demo baseline")
     reset_demo_profile(db, profile_id)
     profile = db.query(StudentProfile).filter(StudentProfile.id == profile_id).first()
     return {"message": f"Profile {profile_id} successfully restored to demo baseline", "profile": profile}
@@ -139,10 +176,12 @@ def reset_profile(profile_id: int, db: Session = Depends(get_db)):
 
 @app.post("/api/subjects", response_model=SubjectOut)
 def create_subject(payload: SubjectCreate, db: Session = Depends(get_db)):
-    if not payload.profile_id:
-        payload.profile_id = 1
+    target_profile_id = payload.profile_id or 1
+    profile = db.query(StudentProfile).filter(StudentProfile.id == target_profile_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Student profile not found")
     subject = Subject(
-        profile_id=payload.profile_id,
+        profile_id=target_profile_id,
         name=payload.name,
         code=payload.code,
         color=payload.color,
@@ -347,6 +386,15 @@ def trigger_schedule_generation(payload: ScheduleGenerationRequest, db: Session 
     )
     return result
 
+@app.get("/api/schedule/summary/{profile_id}", response_model=ScheduleSummary)
+def get_schedule_summary(profile_id: int, db: Session = Depends(get_db)):
+    """
+    Returns accurate live schedule summary, capacity utilization,
+    and backlog deficit without mutating existing sessions.
+    """
+    scheduler = IntelligentScheduler(db=db, profile_id=profile_id)
+    return scheduler.get_current_summary()
+
 # ----------------- ANALYTICS -----------------
 
 @app.get("/api/analytics/{profile_id}")
@@ -467,7 +515,7 @@ def run_test_suite():
     """
     import sys
     root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    test_target = os.path.join("backend", "tests", "test_scheduler.py")
+    test_target = os.path.join("backend", "tests")
     
     cmd = [sys.executable, "-m", "pytest", test_target, "-v", "--tb=short"]
     try:
